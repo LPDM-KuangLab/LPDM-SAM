@@ -250,10 +250,9 @@ module lpdm_mod
     !---------------- v
     par%vres = v(il,jl,kl)*(1.-dely)+v(il,jh,kl)*dely
 
-    !---------------- w  !XXXZH ? why not use rho weighted w?
-    !par%wres = ( rhow(kl)*w(il,jl,kl)*(1.-delz)+rhow(kh)*w(il,jl,kh)*delz )/rho(kl)
-
-    par%wres = w(il,jl,kl)*(1.-delz)+w(il,jl,kh)*delz
+    !---------------- w
+    par%wres = ( rhow(kl)*w(il,jl,kl)*(1.-delz)+rhow(kh)*w(il,jl,kh)*delz )/rho(kl)
+    !par%wres = w(il,jl,kl)*(1.-delz)+w(il,jl,kh)*delz
 
   end subroutine intp_uvw
 
