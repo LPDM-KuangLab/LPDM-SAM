@@ -6,10 +6,10 @@ module lpdm_mod
 !--------------------------------------------!
 ! > xygrids no more than 999x999
 ! > In each subdomain, number of particles no more than 9999999
-! > The subdomain should not larger than 214, otherwise the way to encode id needs to be changed,
-! > Pointer cannot be used for MPI
-! > When run with large number of particles, in lpdm_transfer, mpi buff limit of slave proc may cause model freezen.
-! > Now it is treated by seperating large chunk data into small chunks. if model froze in lpdm_transfer, try to decrease n_tran_max, and adjust n_tran
+! > The subdomain should not be larger than 214, otherwise the way to encode id needs to be changed. The 214 limit is because the id is a 4-byte integer, see more explanation in lpdm_sorting subroutine.
+! > Pointers cannot be used for MPI
+! > When run with a large number of particles, in lpdm_transfer, mpi buff limit of slave proc may cause model to freeze.
+! > Now it is treated by separating large data chunk into small chunks. If model freezes in lpdm_transfer, try to decrease n_tran_max, and adjust n_tran
 
    use vars
    use tracers
@@ -39,15 +39,15 @@ module lpdm_mod
 
   integer, parameter :: lpdm_top     = 120   !70   !64   !70   ! 85  ! top level for mirror reflection b.c.
   integer, parameter :: lpdm_num     = 1200 !1125 !120 !4480 !6400 !1120 !700  !1120 ! 4000  !900!960  ! particles in one column
-  integer, parameter :: n_tran_max   = 80   !100  ! 300 is fine, 400 is not; maximum size of the array that transfored once
-  integer, parameter :: n_tran       = 350  !200  ! maximum number of group is
+  integer, parameter :: n_tran_max   = 80   !100  ! 300 is fine, 400 is not; maximum size of the array that can be transfered at one time in the LPDM transfer
+  integer, parameter :: n_tran       = 350  !200  ! maximum number of loops in the transfer, n_tran*n_tran_max is the maximum total number of particles that can be transfered
 
   !-------------------
-  ! define a longer array
+  ! define an array that holds all the particles in the subdomain. The factor of 2 is included to accomendate potential particle number fluctuations as particles move around.
   integer(4), parameter :: p_num_total= nx_gl*ny_gl*lpdm_num                          ! total number of par
   integer(4), dimension(int(p_num_total/nsubdomains_x/nsubdomains_y*2.0)) :: par_id   ! id of particles
 
-  type (particle), dimension(int(p_num_total/nsubdomains_x/nsubdomains_y*2.0))      :: par_ay
+  type (particle), dimension(int(p_num_total/nsubdomains_x/nsubdomains_y*2.0))      :: par_ay ! ay stands for array
   type (root_particle), dimension(int(p_num_total/nsubdomains_x/nsubdomains_y*2.0)) :: par_ay_dummy ! for MPI passing to par_ay_root only
 
   ! par_ay_root is only allocated in master processor
@@ -88,7 +88,7 @@ module lpdm_mod
 
     if (masterproc) write (*,*)  'calling init in lpdm'
 
-    if (modulo(p_num_total,lpdm_sub) .ne. 0) then
+    if (modulo(p_num_total,lpdm_sub) .ne. 0) then  ! lpdm_sub is the number of output files
       print *, 'Error in lpdm_ini: lpdm_sub is not compatible with p_num_total'
       call task_abort()
     end if
@@ -106,9 +106,11 @@ module lpdm_mod
     rankj = rank/nsubdomains_x + 1
     ranki = rank+1 - (rankj-1)*nsubdomains_x
 
-    if (masterproc) allocate(par_id_root(p_num_total))
-    if (masterproc) allocate(par_ay_root(p_num_total))
-    if (masterproc) allocate(par_ay_root_hold(p_num_total))
+    if (masterproc) then
+      allocate(par_id_root(p_num_total))
+      allocate(par_ay_root(p_num_total))
+      allocate(par_ay_root_hold(p_num_total))
+    end if
 
     sub_pn = 0
     do i = 1,nx
@@ -133,7 +135,7 @@ module lpdm_mod
 
           sub_pn = sub_pn+1
 
-          par_id(sub_pn) = sub_pn+rank*10000000  ! use 10000000 (integer) instead of 1e7(real) - precision loss
+          par_id(sub_pn) = sub_pn+rank*10000000  ! use 10000000 (integer) instead of 1e7(real) to avoid precision loss
           par_ay(sub_pn) = par
 
         enddo
@@ -248,7 +250,7 @@ module lpdm_mod
     !---------------- v
     par%vres = v(il,jl,kl)*(1.-dely)+v(il,jh,kl)*dely
 
-    !---------------- w
+    !---------------- w  !XXXZH ? why not use rho weighted w?
     !par%wres = ( rhow(kl)*w(il,jl,kl)*(1.-delz)+rhow(kh)*w(il,jl,kh)*delz )/rho(kl)
 
     par%wres = w(il,jl,kl)*(1.-delz)+w(il,jl,kh)*delz
@@ -325,7 +327,9 @@ module lpdm_mod
   !-------------------------------------------------------------
   subroutine lpdm_sorting()
 
-    ! sort par_ay_root into ascending sequence using par_id
+    ! Sort par_ay_root into ascending sequence using par_id
+    ! The particles are labeled at the beginning of the run. This subroutine sorts them
+    ! so they are in the same order as they had at the beginning.
     integer*4 :: i,id
     integer*4 :: pos1,pos2,pos
 
@@ -336,7 +340,9 @@ module lpdm_mod
       id=par_id_root(i)
 
       ! decode id
-      pos1 = int(id/10000000)
+      ! pos1 is the index of subdomain the particle locates in, while pos2 is the index of particle within the current subdomain.
+
+      pos1 = int(id/10000000) ! id is a 4-byte integer with the maximum possible value of 2147483647, so pos1 cannot be larger than 214
       pos2 = id-pos1*10000000
       pos  = pos1*(p_num_total/nsubdomains_x/nsubdomains_y)+pos2
 
