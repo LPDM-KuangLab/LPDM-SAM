@@ -19,7 +19,7 @@ This Lagrangian parcel dispersion model (LPDM) is a Fortran module that can be e
 
 ## Model description and validation  <a name="description-validation"></a>
 
-Could we share the link of the manuscript (A Lagrangian Particle Model to study Atmospheric Dynamics: the LPDMX) here?
+We are still working on this section.
 
 ## Implementing the source code <a name="implementing-src"></a>
 
